@@ -1,0 +1,488 @@
+---
+title: "Digital Soil Mapping Report"
+author: "Amanda Cole"
+date: "2023-12-19"
+output: 
+  html_document:
+    code_folding: show
+  
+---
+# 5.1 Simple Model
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+library(recipes)
+library(tidyverse)
+library(dplyr)
+library(knitr)
+library(caret)
+```
+```{r, include=FALSE}
+### Load Data
+df_full <- readRDS(here::here("data/df_full.rds"))
+
+head(df_full) |>
+  knitr::kable()
+```
+
+After loading the data, I set the target to waterlog.100, a binary categorical variable which contains values of 0 and 1 indicating whether the soil is waterlogged at 100cm depth. I set the predictors to include all predictors in the covariates dataset. 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+## Specify target: Waterlog.100
+target <- "waterlog.100"
+
+## Specify predictors_all: Remove soil sampling and observational data
+predictors_all <- names(df_full)[14:ncol(df_full)]
+
+cat("The target is:", target,
+    "\nThe predictors_all are:", paste0(predictors_all[1:8], sep = ", "), "...")
+```
+
+I then split the dataset into training and test sets. 
+```{r echo=TRUE}
+# Split dataset into training and testing sets
+df_train <- df_full |> dplyr::filter(dataset == "calibration")
+df_test  <- df_full |> dplyr::filter(dataset == "validation")
+
+# Filter out any NA to avoid error when running a Random Forest
+df_train <- df_train |> tidyr::drop_na()
+df_test <- df_test   |> tidyr::drop_na()
+```
+
+```{r echo=FALSE}
+# A little bit of verbose output:
+n_tot <- nrow(df_train) + nrow(df_test)
+
+perc_cal <- (nrow(df_train) / n_tot) |> round(2) * 100
+perc_val <- (nrow(df_test)  / n_tot) |> round(2) * 100
+
+cat("For model training, we have a calibration / validation split of: ",
+    perc_cal, "/", perc_val, "%")
+```
+
+After splitting the data into training and test sets, I then trained a Random Forest model using the {ranger} package. Because we are predicting for a categorical variable, this will be a classification model so I set "classification" = TRUE.
+```{r echo=TRUE}
+rf_basic <- ranger::ranger(
+  probability = FALSE,
+  classification = TRUE,
+  y = df_train[, target],     # target variable
+  x = df_train[, predictors_all], # Predictor variables
+  seed = 42,                    # Specify the seed for randomization to reproduce the same model again
+  num.threads = parallel::detectCores() - 1) # Use all but one CPU core for quick model training
+```
+```{r echo=FALSE}
+# Print a summary of fitted model
+print(rf_basic)
+```
+
+I then evaluated the RF classification model on the testing set. 
+```{r echo=TRUE}
+# Make predictions for validation sites
+prediction <- predict(
+  rf_basic,           # RF model
+  data = df_test,   # Predictor data
+  num.threads = parallel::detectCores() - 1
+)
+
+# Save predictions to validation df
+df_test$pred <- prediction$predictions
+```
+
+The model is fairly well balanced in terms of TRUE and FALSE values, with 73 "TRUE" values (36.5%) and 127 "FALSE" values (63.5%). This means that Accuracy, a measure of the proportion of outputs that were correctly classified^1^, is an appropriate metric to use to measure the quality of our model. If the model was imbalanced, Accuracy would not be an appropriate metric to use. 
+
+Other useful metrics for classification include Precision, a measure of the proportion of predictions that were correct out of the total number of predictions^2^; Sensitivity,  a measure of the proportion of real positives that the model correctly predicted^2^, or the True Positive Rate (True Positives/True Positives + False Negatives); False Positive Rate, a measure of the proportion of real negatives that the model classified as positive (False Positives/False Positives + True Negatives)^1^; Specificity, which is a measure of the proportion of true negatives that the model was able to capture^2^; and and the F1 score which is defined as the harmonic mean of precision and sensitivity^1^. The Receiver Operating Characteristic (ROC) curve is also commonly used to evaluate classification models and is composed by plotting the True Positive Rate against the False Positive Rate. This allows you to determine trade-offs between sensitivity and specificity across various classification thresholds^2^. The Area Under the Curve (AUC), defined as the area between the ROC curve and the x-axis, can be used to assess the model performance across the thresholds with a range of 0 to 1, with 1 representing perfect classification and AUC values of closer to 0.5 representing essentially a random classifier^1,2^.
+
+I used the {caret} package to create a Confusion Matrix which includes the necessary metrics.
+```{r echo=TRUE}
+# Classification Metrics
+Y <- df_test$waterlog.100
+Y <- as.factor(Y)
+X <- df_test$pred
+X <- as.factor(X)
+
+#Confusion Matrix
+conf_matrix_waterlog_rfbasic <- caret::confusionMatrix(data=X, reference=Y, positive="1")
+conf_matrix_waterlog_rfbasic
+mosaicplot(conf_matrix_waterlog_rfbasic$table,
+           main = "Confusion matrix")
+```
+
+As reported by the confusion matrix above, our simple model using all predictors and pre-defined hyperparameters produced an Accuracy of 0.765. The Sensitivity was 0.6857, meaning that our model correctly predicted 68.57% of true positive and the Specificity was 0.8077, meaning that our model correctly predicted 80.77% of true negatives. 
+
+# 5.2 Variable Selection
+
+Using all available predictors to train a model increases the risk of overfitting, i.e. the model reflects not just the true underlying pattern or relationship in the data but also observation errors or random fluctuations in the data. By identifying and selecting on the models that are most important, we can reduce variance and increase generalisability (the model's ability to make predictions on unseen data).
+
+I first used the {ranger} package, setting "importance" = permutation to calculate variable importance. This will permute or randomly shuffle a predictors values and measure the impact on model performance to determine the impact on model performance.
+```{r echo=TRUE}
+### Variable Importance
+rf_varimport <- ranger::ranger(
+  probability = FALSE,
+  y = df_train[, target],     # target variable
+  x = df_train[, predictors_all],   # Predictor variables
+  importance   = "permutation", # Pick permutation to calculate variable importance
+  classification = TRUE,
+  seed = 42,                    # Specify seed for randomization to reproduce the same model again
+  num.threads = parallel::detectCores() - 1) # Use all but one CPU core for quick model training
+```
+
+```{r echo=FALSE}
+# Extract the variable importance and create a long tibble
+vi_rf_varimport <- rf_varimport$variable.importance |>
+  dplyr::bind_rows() |>
+  tidyr::pivot_longer(cols = dplyr::everything(), names_to = "Variable")
+```
+
+The below bar graph shows the order of importance of the variables. Higher values reflect a stronger the effect of permutation and higher importance of the variables.
+
+```{r echo=FALSE}
+# Plot variable importance, ordered by decreasing value
+gg <- vi_rf_varimport |>
+  ggplot2::ggplot(ggplot2::aes(x = reorder(Variable, value), y = value)) +
+  ggplot2::geom_bar(stat = "identity", fill = "grey50", width = 0.75) +
+  ggplot2::labs(
+    y = "Change in OOB accuracy after permutation",
+    x = "",
+    title = "Variable importance based on OOB") +
+  ggplot2::theme(text=element_text(size=7))+
+  ggplot2::coord_flip()
+
+# Display plot
+gg
+```
+
+The five most important variables were as follows: 
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Extract the variable importance and create a long tibble
+vi_rf_varimport <- rf_varimport$variable.importance |>
+  dplyr::bind_rows() |>
+  tidyr::pivot_longer(cols = dplyr::everything(), names_to = "Variable")
+
+vi_rf_varimport_top5 <- vi_rf_varimport |> 
+  top_n(5, value)
+
+vi_rf_varimport_top5 <- vi_rf_varimport_top5 |>
+  arrange(desc(value))
+
+vi_rf_varimport_top5 <- vi_rf_varimport_top5 |>
+  mutate(Importance = row_number())
+
+vi_rf_varimport_top5 <- vi_rf_varimport_top5 |>
+  rename(Value = value)
+
+vi_rf_varimport_top5 <- vi_rf_varimport_top5 |>
+  select(Importance, Variable, Value)
+
+library(knitr)
+kable(vi_rf_varimport_top5)
+```
+
+I then used the {Boruta} package to perform a permutation of the values to determine their importance. 
+```{r echo=TRUE}
+### Variable Selection
+set.seed(42)
+
+# run the algorithm
+bor <- Boruta::Boruta(
+  y = df_train[, target],
+  x = df_train[, predictors_all],
+  maxRuns = 50, # Number of iterations. Set to 30 or lower if it takes too long
+  num.threads = parallel::detectCores()-1)
+
+# obtain results: a data frame with all variables, ordered by their importance
+df_bor <- Boruta::attStats(bor) |>
+  tibble::rownames_to_column() |>
+  dplyr::arrange(dplyr::desc(meanImp))
+```
+
+The variables deemed important "Confirmed" are shown in orange below.
+```{r echo=FALSE}
+ggplot2::ggplot(ggplot2::aes(x = reorder(rowname, meanImp),
+                             y = meanImp,
+                             fill = decision),
+                data = df_bor) +
+  ggplot2::geom_bar(stat = "identity", width = 0.75) +
+  ggplot2::scale_fill_manual(values = c("grey30", "tomato", "grey70")) +
+  ggplot2::labs(
+    y = "Variable importance",
+    x = "",
+    title = "Variable importance based on Boruta") +
+  ggplot2::theme(text=element_text(size=7)) +
+  ggplot2::coord_flip()
+```
+
+The Boruta algorithm categorized 39 variables as "Confirmed". The variables deemed important by the Boruta algorithm were largely the same as those identified by the {ranger} package.
+```{r echo=TRUE}
+# get retained important variables
+predictors_selected <- df_bor |>
+  dplyr::filter(decision == "Confirmed") |>
+  dplyr::pull(rowname)
+length(predictors_selected)
+```
+
+I then retrained the Random Forest model using the 39 variables deemed important by the Boruta algorithm.
+```{r echo=TRUE}
+# re-train Random Forest model
+rf_bor <- ranger::ranger(
+  probability = FALSE,
+  y = df_train[, target],              # target variable
+  x = df_train[, predictors_selected], # Predictor variables
+  classification = TRUE,
+  seed = 42,                           # Specify the seed for randomization to reproduce the same model again
+  num.threads = parallel::detectCores() - 1) # Use all but one CPU core for quick model training
+
+# quick report and performance of trained model object
+rf_bor
+```
+
+I then evaluated the model on the testing subset of the data.
+```{r include=FALSE}
+# Load area to be predicted
+raster_mask <- terra::rast(here::here("data-raw/geodata/study_area/area_to_be_mapped.tif"))
+# Turn target raster into a dataframe, 1 px = 1 cell
+df_mask <- as.data.frame(raster_mask, xy = TRUE)
+
+# Filter only for area of interest
+df_mask <- df_mask |>
+  dplyr::filter(area_to_be_mapped == 1)
+
+files_covariates <- list.files(
+  path = here::here("data-raw/geodata/covariates/"),
+  pattern = ".tif$",
+  recursive = TRUE,
+  full.names = TRUE
+)
+
+# Filter that list only for the variables used in the RF
+preds_selected <- names(df_train[, predictors_selected])
+files_selected <- files_covariates[apply(sapply(X = preds_selected,
+                                                FUN = grepl,
+                                                files_covariates),
+                                         MARGIN =  1,
+                                         FUN = any)]
+
+# Load all rasters as a stack
+raster_covariates <- terra::rast(files_selected)
+
+# Get coordinates for which we want data
+df_locations <- df_mask |>
+  dplyr::select(x, y)
+
+# Extract data from covariate raster stack for all gridcells in the raster
+df_predict <- terra::extract(
+  raster_covariates,   # The raster we want to extract from
+  df_locations,        # A matrix of x and y values to extract for
+  ID = FALSE           # To not add a default ID column to the output
+)
+
+df_predict <- cbind(df_locations, df_predict) |>
+  tidyr::drop_na()  # Se_TWI2m has a small number of missing data
+```
+
+```{r echo=TRUE}
+# Make predictions for validation sites
+prediction <- predict(
+  rf_bor,           # RF model
+  data = df_test,   # Predictor data
+  num.threads = parallel::detectCores() - 1
+)
+
+# Save predictions to validation df
+df_test$pred <- prediction$predictions
+```
+
+```{r echo=FALSE}
+# Classification Metrics
+Y <- df_test$waterlog.100
+Y <- as.factor(Y)
+X <- df_test$pred
+X <- as.factor(X)
+
+#Confusion Matrix
+conf_matrix_waterlog_bor <- caret::confusionMatrix(data=X, reference=Y, positive="1")
+conf_matrix_waterlog_bor
+mosaicplot(conf_matrix_waterlog_rfbasic$table,
+           main = "Confusion matrix")
+```
+
+As reported by the confusion matrix above, our model using predictors selected by the Boruta algorithm and pre-defined hyperparameters produced an Accuracy of 0.79. The Sensitivity was 0.7286, meaning that our model correctly predicted 72.86% of true positive and the Specificity was 0.8231, meaning that our model correctly predicted 82.31% of true negatives. 
+
+The model trained using the predictors selected by the Boruta algorithm had a higher accuracy when evaluated on the testing subset than the simple model (0.79 vs 0.765 respectively. Therefore, the new model trained on the selected variables generalises better to unseen data than the simple model. 
+
+However, when considering the OOB prediction error reported as part of the trained model object, the simple model actually has a better OOB prediction error than that of the model trained on the Boruta selected predictors (21% vs 20.5% respectively). 
+
+# 5.3 Model Optimization
+
+For Random Forest algorithms, we can control the complexity and randomness of the RF through hyperparameters in the {ranger} package such as min.node.size, num.trees, and mtry. Hyperparameters have a large impact on model performance and sub-optimal hyperparameters can lead to over or under fitting or low generalisability^1^. While our Random Forest models have fairly good accuracy with the pre-defined hyperparameters, we can tune the hyperparameters to improve model performance.  
+
+I used the {caret} library to implement a 5-fold cross-validation to optimise hyperparameters m.try, min.node.size, and splitrule, using a greedy hyperparameter tuning approach. 
+```{r include=FALSE}
+# Set recipe
+df_train$waterlog.100 <- as.factor(df_train$waterlog.100)
+
+pp <- recipes::recipe(waterlog.100 ~ NegO + mrvbf25 + mt_rr_y + Se_diss2m_50c + Se_TWI2m + Se_curv2m_s60 + be_gwn25_vdist + Se_MRVBF2m + lsf + Se_TWI2m_s15 + cindx10_25 + mt_td_y + Se_tpi_2m_50c + terrTextur + tsc25_40 + Se_NO2m_r500 + Se_curv2m_fmean_50c + Se_TWI2m_s60 + Se_slope50m + tsc25_18 + vdcn25 + Se_alti2m_std_50c + mt_tt_y + Se_curv50m + be_gwn25_hdist + Se_rough2m_10c + Se_curvplan2m_s60 + Se_diss2m_5c + Se_curvprof50m + Se_slope6m + Se_rough2m_5c + Se_SCA2m + Se_curvplan50m + Se_slope2m_s7 + Se_slope2m_fmean_5c + Se_slope2m_fmean_50c + Se_slope2m_s60 + Se_curv25m, data = df_train)
+```
+After setting the possible mtry, min.node.size, and splitrule values, I optimized min.node.size first, keeping mtry and splitrule constant. 
+```{r echo=TRUE}
+## Hyperparameter Tuning
+mtry_values <- c(2,3,4,5,6,7,8,9,10,12,14,16)
+min.node.size_values <- c(2,5,10,20,25)
+splitrule_values <- c("gini", "extratrees")
+
+mod <- caret::train(
+  pp,
+  data = df_train %>%
+    drop_na(),
+  method = "ranger",
+  trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
+  tuneGrid = expand.grid( .mtry = 9,
+                          .min.node.size = min.node.size_values,
+                          .splitrule = "gini"),
+  metric = "Accuracy",
+  replace = FALSE,
+  sample.fraction = 0.5,
+  num.trees = 50,
+  seed = 42                # for reproducibility
+)
+print(mod)
+```
+Then I used the best value for min.node.size (10) and optimised mtry. 
+```{r echo=TRUE}
+mod <- caret::train(
+  pp,
+  data = df_train %>%
+    drop_na(),
+  method = "ranger",
+  trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
+  tuneGrid = expand.grid( .mtry = mtry_values,
+                          .min.node.size = 10,
+                          .splitrule = "gini"),
+  metric = "Accuracy",
+  replace = FALSE,
+  sample.fraction = 0.5,
+  num.trees = 50,
+  seed = 42                # for reproducibility
+)
+print(mod)
+```
+Then, used the best value for mtry and the best value for min.node.size obtained from the previous run and optimised splitrule.
+```{r echo=FALSE}
+
+mod <- caret::train(
+  pp,
+  data = df_train %>%
+    drop_na(),
+  method = "ranger",
+  trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
+  tuneGrid = expand.grid( .mtry = 12,
+                          .min.node.size = 10,
+                          .splitrule = splitrule_values),
+  metric = "Accuracy",
+  replace = FALSE,
+  sample.fraction = 0.5,
+  num.trees = 50,
+  seed = 42                # for reproducibility
+)
+print(mod)
+```
+The best combination of hyperparameters obtained from greedy hyperparameter tuning was mtry=12, min.node.size=12, and splitrule=gini.
+
+I then retrained the model using the optimized hyperparameters.
+```{r echo=TRUE}
+mod <- caret::train(
+  pp,
+  data = df_train |>
+    drop_na(),
+  method = "ranger",
+  trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
+  tuneGrid = expand.grid( .mtry = 12,
+                          .min.node.size = 10,
+                          .splitrule = "gini"),
+  metric = "Accuracy",
+  replace = FALSE,
+  sample.fraction = 0.5,
+  num.trees = 100,
+  seed = 42                # for reproducibility
+)
+print(mod)
+```
+
+I then evaluated the model on the testing subset of the data. 
+```{r include=FALSE}
+#### Model Analysis
+rf_mod   <- readRDS(here::here("data/rf_mod_for_waterlog.100.rds"))
+df_train <- readRDS(here::here("data/cal_bor_for_waterlog.100.rds"))
+df_test  <- readRDS(here::here("data/val_bor_for_waterlog.100.rds"))
+
+# Load area to be predicted
+raster_mask <- terra::rast(here::here("data-raw/geodata/study_area/area_to_be_mapped.tif"))
+# Turn target raster into a dataframe, 1 px = 1 cell
+df_mask <- as.data.frame(raster_mask, xy = TRUE)
+
+# Filter only for area of interest
+df_mask <- df_mask |>
+  dplyr::filter(area_to_be_mapped == 1)
+
+files_covariates <- list.files(
+  path = here::here("data-raw/geodata/covariates/"),
+  pattern = ".tif$",
+  recursive = TRUE,
+  full.names = TRUE
+)
+
+preds_selected <- names(df_train[, predictors_selected])
+files_selected <- files_covariates[apply(sapply(X = preds_selected,
+                                                FUN = grepl,
+                                                files_covariates),
+                                         MARGIN =  1,
+                                         FUN = any)]
+
+# Load all rasters as a stack
+raster_covariates <- terra::rast(files_selected)
+
+# Get coordinates for which we want data
+df_locations <- df_mask |>
+  dplyr::select(x, y)
+
+# Extract data from covariate raster stack for all gridcells in the raster
+df_predict <- terra::extract(
+  raster_covariates,   # The raster we want to extract from
+  df_locations,        # A matrix of x and y values to extract for
+  ID = FALSE           # To not add a default ID column to the output
+)
+
+df_predict <- cbind(df_locations, df_predict) |>
+  tidyr::drop_na()  # Se_TWI2m has a small number of missing data
+```
+
+```{r echo=TRUE}
+# Make predictions for validation sites
+prediction <- predict(
+  rf_mod,           # RF model
+  newdata = df_test,   # Predictor data
+  num.threads = parallel::detectCores() - 1
+)
+
+# Save predictions to validation df
+df_test$predcv <- prediction
+```
+
+```{r echo=FALSE}
+# Classification Metrics
+Y <- df_test$waterlog.100
+Y <- as.factor(Y)
+X <- df_test$predcv
+X <- as.factor(X)
+
+conf_matrix_waterlog_rfmodcv <- caret::confusionMatrix(data=X, reference=Y, positive="1")
+conf_matrix_waterlog_rfmodcv
+mosaicplot(conf_matrix_waterlog_rfbasic$table,
+           main = "Confusion matrix")
+```
+
+The model accuracy obtained with the optimised hyperparameters was 0.785. Therefore, this model does not generalise better to unseen data than the initial model. The default hyperparameters were mtry=6 and target node size=1. 
+
+# 5.4 Probabalistic Predictions
