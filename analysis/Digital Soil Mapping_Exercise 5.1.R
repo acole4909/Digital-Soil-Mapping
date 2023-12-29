@@ -1,6 +1,11 @@
 #### AGDS II: Digital Soil Mapping Exercise 5.1
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(terra)
+library(here)
 ### Load Data
-df_full <- readRDS(here::here("data/df_full.rds"))
+df_full <- readRDS(here::here("data/df_full2.rds"))
 
 head(df_full) |>
   knitr::kable()
@@ -129,6 +134,7 @@ mosaicplot(conf_matrix_waterlog_rfbasic$table,
            main = "Confusion matrix")
 
 ### Create Prediction Maps
+df_predict$vszone <- trimws(df_predict$vszone) #vszone tif was reading in with missing values, this fixed the issue.
 prediction <- predict(
   rf_basic,              # RF model
   data = df_predict,
@@ -153,9 +159,11 @@ raster_pred <- terra::rast(
 ggplot2::ggplot() +
   tidyterra::geom_spatraster(data = raster_pred) +
   ggplot2::scale_fill_viridis_c(
+    breaks = seq(0,1, by=1),
+    labels = c("0", "1"),
     na.value = NA,
     option = "viridis",
-    name = "Waterlog.100"
+    name = "Waterlog.100",
   ) +
   ggplot2::theme_classic() +
   ggplot2::scale_x_continuous(expand = c(0, 0)) +
@@ -163,9 +171,10 @@ ggplot2::ggplot() +
   ggplot2::labs(title = "Predicted Waterlog")
 
 # Save raster as .tif file
+if (!dir.exists(here::here("data"))) system(paste0("mkdir ", here::here("data")))
 terra::writeRaster(
   raster_pred,
-  "../data/ra_predicted_waterlog100.tif",
+  "data/ra_predicted_waterlog100.tif",
   datatype = "FLT4S",  # FLT4S for floats, INT1U for integers (smaller file)
   filetype = "GTiff",  # GeoTiff format
   overwrite = TRUE     # Overwrite existing file

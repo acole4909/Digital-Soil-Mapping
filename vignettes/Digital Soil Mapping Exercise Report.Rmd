@@ -79,6 +79,54 @@ print(rf_basic)
 ```
 
 I then evaluated the RF classification model on the testing set. 
+
+```{r echo=FALSE}
+# Load area to be predicted
+raster_mask <- terra::rast(here::here("data-raw/geodata/study_area/area_to_be_mapped.tif"))
+# Turn target raster into a dataframe, 1 px = 1 cell
+df_mask <- as.data.frame(raster_mask, xy = TRUE)
+
+# Filter only for area of interest
+df_mask <- df_mask |>
+  dplyr::filter(area_to_be_mapped == 1)
+
+# Display df
+head(df_mask) |>
+  knitr::kable()
+
+files_covariates <- list.files(
+  path = here::here("data-raw/geodata/covariates/"),
+  pattern = ".tif$",
+  recursive = TRUE,
+  full.names = TRUE
+)
+
+# Filter for variables used in RF
+preds_all <- names((df_train[, predictors_all]))
+files_selected <- files_covariates[apply(sapply(X = preds_all,
+                                                FUN = grepl,
+                                                files_covariates),
+                                         MARGIN =  1,
+                                         FUN = any)]
+
+# Load all rasters as a stack
+raster_covariates <- terra::rast(files_selected)
+
+# Get coordinates for which we want data
+df_locations <- df_mask |>
+  dplyr::select(x, y)
+
+# Extract data from covariate raster stack for all gridcells in the raster
+df_predict <- terra::extract(
+  raster_covariates,   # The raster we want to extract from
+  df_locations,        # A matrix of x and y values to extract for
+  ID = FALSE           # To not add a default ID column to the output
+)
+
+df_predict <- cbind(df_locations, df_predict) |>
+  tidyr::drop_na()  # Se_TWI2m has a small number of missing data
+```
+
 ```{r echo=TRUE}
 # Make predictions for validation sites
 prediction <- predict(

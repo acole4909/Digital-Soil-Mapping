@@ -1,7 +1,7 @@
 ##### Exercise 5: 5.2
 #### Data Loading and Preparation
 ### Load Data
-df_full <- readRDS(here::here("data/df_full.rds"))
+df_full <- readRDS(here::here("data/df_full2.rds"))
 
 head(df_full) |>
   knitr::kable()
