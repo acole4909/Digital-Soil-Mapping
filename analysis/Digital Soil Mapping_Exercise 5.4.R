@@ -1,4 +1,9 @@
 ##### Exercise 5: 5.4
+# Load data
+rf_bor   <- readRDS(here::here("data/rf_bor_for_waterlog.100.rds"))
+df_train <- readRDS(here::here("data/cal_bor_for_waterlog.100.rds"))
+df_test  <- readRDS(here::here("data/val_bor_for_waterlog.100.rds"))
+predictors_selected <- readRDS(here::here("data/predictors_selected.rds"))
 library(plotROC)
 
 rf_prob <- ranger::ranger(
@@ -80,47 +85,6 @@ prediction <- predict(
 # Save predictions to validation df
 df_test$pred <- prediction$predictions
 predictions <- prediction$predictions
-
-df_test$pred0.5 <- ifelse(df_test$pred[,1]>0.5, 1, 0)
-Y1 <- df_test$waterlog.100
-Y1 <- as.factor(df_test$waterlog.100)
-X1 <- df_test$pred0.5
-X1 <- as.factor(df_test$pred0.5)
-
-df_test$pred0.75 <- ifelse(df_test$pred[,1]>0.75, 1, 0)
-Y2 <- df_test$waterlog.100
-Y2 <- as.factor(df_test$waterlog.100)
-X2 <- df_test$pred0.75
-X2 <- as.factor(df_test$pred0.75)
-
-df_test$pred0.25 <- ifelse(df_test$pred[,1]>0.25, 1, 0)
-Y3 <- df_test$waterlog.100
-Y3 <- as.factor(df_test$waterlog.100)
-X3 <- df_test$pred0.25
-X3 <- as.factor(df_test$pred0.25)
-
-conf_matrix_waterlog_prob0.5 <- caret::confusionMatrix(data=X1, reference=Y1, positive="1")
-conf_matrix_waterlog_prob0.5
-# Sensitivity (TPR) for Tau=0.5 is 0.7143, FPR for Tau=0.5 is 0.1846
-conf_matrix_waterlog_prob0.75 <- caret::confusionMatrix(data=X2, reference=Y2, positive="1")
-conf_matrix_waterlog_prob0.75
-# Sensitivity (TPR) for Tau=0.75 is 0.2571, FPR for Tau=0.75 is 0.0385
-conf_matrix_waterlog_prob0.25 <- caret::confusionMatrix(data=X3, reference=Y3, positive="1")
-conf_matrix_waterlog_prob0.25
-# Sensitivity (TPR) for Tau=0.25 is 0.8571, FPR for Tau=0.25 is 0.4077
-
-## Plot ROC
-x1 <- 0.1846
-y1 <- 0.7143
-x2 <- 0.0385
-y2 <- 0.2571
-x3 <- 0.4077
-y3 <- 0.8571
-df <- data.frame(x = c(x1, x2, x3), y = c(y1, y2, y3))
-ggplot(df, aes(x = x, y = y)) +
-  geom_point()+
-  xlim(0,1)+
-  ylim(0,1)
 
 #ROC Curve
 basicplot <- ggplot(df_test, aes(d=waterlog.100, m=pred[,1])) + geom_roc()

@@ -1,7 +1,20 @@
 ##### Exercise 5: 5.2
 #### Data Loading and Preparation
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(terra)
+library(here)
 ### Load Data
-df_full <- readRDS(here::here("data/df_full2.rds"))
+df_full <- readRDS(here::here("data/df_full.rds"))
+df_train <- readRDS(here::here("data/cal_basic_for_waterlog100.rds"))
+df_test  <- readRDS(here::here("data/val_basic_for_waterlog100.rds"))
+
+## Specify target: Waterlog.100
+target <- "waterlog.100"
+
+## Specify predictors_all
+predictors_all <- names(df_full)[14:ncol(df_full)]
 
 ### Variable Importance
 rf_varimport <- ranger::ranger(
@@ -172,7 +185,7 @@ X <- as.factor(X)
 #Confusion Matrix
 conf_matrix_waterlog_bor <- caret::confusionMatrix(data=X, reference=Y, positive="1")
 conf_matrix_waterlog_bor
-mosaicplot(conf_matrix_waterlog_rfbasic$table,
+mosaicplot(conf_matrix_waterlog_bor$table,
            main = "Confusion matrix")
 
 ### Create Prediction Maps
@@ -199,6 +212,8 @@ raster_pred <- terra::rast(
 ggplot2::ggplot() +
   tidyterra::geom_spatraster(data = raster_pred) +
   ggplot2::scale_fill_viridis_c(
+    breaks = seq(0,1, by=1),
+    labels = c("0", "1"),
     na.value = NA,
     option = "viridis",
     name = "Waterlog.100"

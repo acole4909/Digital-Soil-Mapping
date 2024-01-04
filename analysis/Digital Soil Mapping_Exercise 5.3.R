@@ -4,40 +4,26 @@ library(caret)
 library(recipes)
 library(dplyr)
 library(tidyverse)
+library(ggplot2)
+library(terra)
+library(here)
 
 # Load Borruta random forest model
 rf_bor   <- readRDS(here::here("data/rf_bor_for_waterlog.100.rds"))
 df_train <- readRDS(here::here("data/cal_bor_for_waterlog.100.rds"))
 df_test  <- readRDS(here::here("data/val_bor_for_waterlog.100.rds"))
+predictors_selected <- readRDS(here::here("data/predictors_selected.rds"))
 
 # Set target
 target <- "waterlog.100"
-target <- as.factor(target)
 # Specify predictors_selected
 preds_selected <- names(df_train[, predictors_selected])
 
 cat("The target is:", target,
     "\nThe predictors_selected are:", paste0(preds_selected[1:8], sep = ", "), "...")
 
-# Split dataset into training and testing sets
-df_train <- df_full |> dplyr::filter(dataset == "calibration")
-df_test  <- df_full |> dplyr::filter(dataset == "validation")
-
-# Filter out any NA to avoid error when running a Random Forest
-df_train <- df_train |> tidyr::drop_na()
-df_test <- df_test   |> tidyr::drop_na()
-
-# A little bit of verbose output:
-n_tot <- nrow(df_train) + nrow(df_test)
-
-perc_cal <- (nrow(df_train) / n_tot) |> round(2) * 100
-perc_val <- (nrow(df_test)  / n_tot) |> round(2) * 100
-
-cat("For model training, we have a calibration / validation split of: ",
-    perc_cal, "/", perc_val, "%")
-set.seed(42)
-
 # Recipes for Train
+set.seed(42)
 df_train$waterlog.100 <- as.factor(df_train$waterlog.100)
 is.factor(df_train$waterlog.100)
 pp <- recipes::recipe(waterlog.100 ~ NegO + mrvbf25 + mt_rr_y + Se_diss2m_50c + Se_TWI2m + Se_curv2m_s60 + be_gwn25_vdist + Se_MRVBF2m + lsf +
@@ -75,7 +61,7 @@ mod <- caret::train(
   method = "ranger",
   trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
   tuneGrid = expand.grid( .mtry = mtry_values,
-                          .min.node.size = 10,
+                          .min.node.size = 5,
                           .splitrule = "gini"),
   metric = "Accuracy",
   replace = FALSE,
@@ -184,7 +170,7 @@ df_predict <- cbind(df_locations, df_predict) |>
 
 # Make predictions for validation sites
 prediction <- predict(
-  rf_mod,
+  mod,
   newdata = df_test,
   num.threads = parallel::detectCores() - 1
 )
@@ -200,7 +186,7 @@ X <- as.factor(X)
 
 conf_matrix_waterlog_rfmodcv <- caret::confusionMatrix(data=X, reference=Y, positive="1")
 conf_matrix_waterlog_rfmodcv
-mosaicplot(conf_matrix_waterlog_rfbasic$table,
+mosaicplot(conf_matrix_waterlog_rfmodcv$table,
            main = "Confusion matrix")
 
 
@@ -238,9 +224,10 @@ ggplot2::ggplot() +
   ggplot2::labs(title = "Predicted Waterlog")
 
 # Save raster as .tif file
+if (!dir.exists(here::here("data"))) system(paste0("mkdir ", here::here("data")))
 terra::writeRaster(
   raster_pred,
-  "../data/ra_predicted_waterlog100.tif",
+  "data/ra_predicted_rfmod_waterlog100.tif",
   datatype = "FLT4S",  # FLT4S for floats, INT1U for integers (smaller file)
   filetype = "GTiff",  # GeoTiff format
   overwrite = TRUE     # Overwrite existing file
