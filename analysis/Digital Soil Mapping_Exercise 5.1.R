@@ -5,7 +5,7 @@ library(tidyverse)
 library(terra)
 library(here)
 ### Load Data
-df_full <- readRDS(here::here("data/df_full2.rds"))
+df_full <- readRDS(here::here("data/df_full.rds"))
 
 head(df_full) |>
   knitr::kable()
@@ -13,7 +13,7 @@ head(df_full) |>
 ## Specify target: Waterlog.100
 target <- "waterlog.100"
 
-## Specify predictors_all: Remove soil sampling and observational data
+## Specify predictors_all
 predictors_all <- names(df_full)[14:ncol(df_full)]
 
 cat("The target is:", target,
@@ -23,11 +23,10 @@ cat("The target is:", target,
 df_train <- df_full |> dplyr::filter(dataset == "calibration")
 df_test  <- df_full |> dplyr::filter(dataset == "validation")
 
-# Filter out any NA to avoid error when running a Random Forest
+# Filter out any NAs
 df_train <- df_train |> tidyr::drop_na()
 df_test <- df_test   |> tidyr::drop_na()
 
-# A little bit of verbose output:
 n_tot <- nrow(df_train) + nrow(df_test)
 
 perc_cal <- (nrow(df_train) / n_tot) |> round(2) * 100
@@ -45,11 +44,10 @@ rf_basic <- ranger::ranger(
   seed = 42,                    # Specify the seed for randomization to reproduce the same model again
   num.threads = parallel::detectCores() - 1) # Use all but one CPU core for quick model training
 
-# Print a summary of fitted model
+# Print summary
 print(rf_basic)
 
 #Save Data
-# Save relevant data for model testing in the next chapter.
 saveRDS(rf_basic,
         here::here("data/rf_basic_for_waterlog100.rds"))
 
@@ -60,7 +58,7 @@ saveRDS(df_test[, c(target, predictors_all)],
         here::here("data/val_basic_for_waterlog100.rds"))
 
 #### Model Analysis
-# Load random forest model
+# Load random forest model from data folder
 rf_basic   <- readRDS(here::here("data/rf_basic_for_waterlog100.rds"))
 df_train <- readRDS(here::here("data/cal_basic_for_waterlog100.rds"))
 df_test  <- readRDS(here::here("data/val_basic_for_waterlog100.rds"))
@@ -70,11 +68,11 @@ raster_mask <- terra::rast(here::here("data-raw/geodata/study_area/area_to_be_ma
 # Turn target raster into a dataframe, 1 px = 1 cell
 df_mask <- as.data.frame(raster_mask, xy = TRUE)
 
-# Filter only for area of interest
+# Filter for area of interest
 df_mask <- df_mask |>
   dplyr::filter(area_to_be_mapped == 1)
 
-# Display df
+# Display data frame
 head(df_mask) |>
   knitr::kable()
 
@@ -96,28 +94,28 @@ files_selected <- files_covariates[apply(sapply(X = preds_all,
 # Load all rasters as a stack
 raster_covariates <- terra::rast(files_selected)
 
-# Get coordinates for which we want data
+# Get coordinates
 df_locations <- df_mask |>
   dplyr::select(x, y)
 
 # Extract data from covariate raster stack for all gridcells in the raster
 df_predict <- terra::extract(
-  raster_covariates,   # The raster we want to extract from
-  df_locations,        # A matrix of x and y values to extract for
-  ID = FALSE           # To not add a default ID column to the output
+  raster_covariates,
+  df_locations,
+  ID = FALSE
 )
 
 df_predict <- cbind(df_locations, df_predict) |>
-  tidyr::drop_na()  # Se_TWI2m has a small number of missing data
+  tidyr::drop_na()
 
 # Make predictions for validation sites
 prediction <- predict(
-  rf_basic,           # RF model
-  data = df_test,   # Predictor data
+  rf_basic,
+  data = df_test,
   num.threads = parallel::detectCores() - 1
 )
 
-# Save predictions to validation df
+# Save predictions to validation data frame
 df_test$pred <- prediction$predictions
 
 # Classification Metrics
@@ -136,26 +134,24 @@ mosaicplot(conf_matrix_waterlog_rfbasic$table,
 ### Create Prediction Maps
 df_predict$vszone <- trimws(df_predict$vszone) #vszone tif was reading in with missing values, this fixed the issue.
 prediction <- predict(
-  rf_basic,              # RF model
+  rf_basic,
   data = df_predict,
   num.threads = parallel::detectCores() - 1)
 
-# Attach predictions to dataframe and round them
+# Attach predictions to dataframe
 df_predict$prediction <- prediction$predictions
 
 # Extract dataframe with coordinates and predictions
 df_map <- df_predict |>
   dplyr::select(x, y, prediction)
 
-# Turn dataframe into a raster
+# Turn dataframe into raster
 raster_pred <- terra::rast(
   df_map,                  # Table to be transformed
   crs = "+init=epsg:2056", # Swiss coordinate system
   extent = terra::ext(raster_covariates) # Prescribe same extent as predictor rasters
 )
 
-# Let's have a look at our predictions!
-# To have some more flexibility, we can plot this in the ggplot-style as such:
 ggplot2::ggplot() +
   tidyterra::geom_spatraster(data = raster_pred) +
   ggplot2::scale_fill_viridis_c(
@@ -175,7 +171,7 @@ if (!dir.exists(here::here("data"))) system(paste0("mkdir ", here::here("data"))
 terra::writeRaster(
   raster_pred,
   "data/ra_predicted_waterlog100.tif",
-  datatype = "FLT4S",  # FLT4S for floats, INT1U for integers (smaller file)
-  filetype = "GTiff",  # GeoTiff format
-  overwrite = TRUE     # Overwrite existing file
+  datatype = "FLT4S",
+  filetype = "GTiff",
+  overwrite = TRUE
 )

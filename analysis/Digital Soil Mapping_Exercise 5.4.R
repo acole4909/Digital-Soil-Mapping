@@ -1,16 +1,18 @@
 ##### Exercise 5: 5.4
+library(plotROC)
+
 rf_prob <- ranger::ranger(
 probability = TRUE,
 classification = TRUE,
-y = df_train[, "waterlog.100"],     # target variable
+y = df_train[, "waterlog.100"],     # Target variable
 x = df_train[, predictors_selected], # Predictor variables
-seed = 42,                    # Specify the seed for randomization to reproduce the same model again
-num.threads = parallel::detectCores() - 1) # Use all but one CPU core for quick model training
+seed = 42,
+num.threads = parallel::detectCores() - 1)
 
-# Print a summary of fitted model
+# Print summary
 print(rf_prob)
 
-# Save relevant data for model testing in the next chapter.
+# Save Data
 saveRDS(rf_prob,
         here::here("data/rf_prob_for_waterlog.100.rds"))
 
@@ -31,11 +33,11 @@ raster_mask <- terra::rast(here::here("data-raw/geodata/study_area/area_to_be_ma
 # Turn target raster into a dataframe, 1 px = 1 cell
 df_mask <- as.data.frame(raster_mask, xy = TRUE)
 
-# Filter only for area of interest
+# Filter for area of interest
 df_mask <- df_mask |>
   dplyr::filter(area_to_be_mapped == 1)
 
-# Display df
+# Display data frame
 head(df_mask) |>
   knitr::kable()
 
@@ -59,13 +61,13 @@ df_locations <- df_mask |>
 
 # Extract data from covariate raster stack for all gridcells in the raster
 df_predict <- terra::extract(
-  raster_covariates,   # The raster we want to extract from
-  df_locations,        # A matrix of x and y values to extract for
-  ID = FALSE           # To not add a default ID column to the output
+  raster_covariates,
+  df_locations,
+  ID = FALSE
 )
 
 df_predict <- cbind(df_locations, df_predict) |>
-  tidyr::drop_na()  # Se_TWI2m has a small number of missing data
+  tidyr::drop_na()
 
 # Make predictions for validation sites
 prediction <- predict(

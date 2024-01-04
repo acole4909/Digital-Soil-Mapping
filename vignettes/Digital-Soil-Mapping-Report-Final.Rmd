@@ -43,17 +43,16 @@ cat("The target is:", target,
 
 I then split the dataset into training and test sets. 
 ```{r echo=TRUE}
-# Split dataset into training and testing sets
+# Splitting dataset into training and testing sets
 df_train <- df_full |> dplyr::filter(dataset == "calibration")
 df_test  <- df_full |> dplyr::filter(dataset == "validation")
 
-# Filter out any NA to avoid error when running a Random Forest
+# Filtering out any NAs
 df_train <- df_train |> tidyr::drop_na()
 df_test <- df_test   |> tidyr::drop_na()
 ```
 
 ```{r echo=FALSE}
-# A little bit of verbose output:
 n_tot <- nrow(df_train) + nrow(df_test)
 
 perc_cal <- (nrow(df_train) / n_tot) |> round(2) * 100
@@ -68,9 +67,9 @@ After splitting the data into training and test sets, I then trained a Random Fo
 rf_basic <- ranger::ranger(
   probability = FALSE,
   classification = TRUE,
-  y = df_train[, target],     # target variable
+  y = df_train[, target],     # Target variable
   x = df_train[, predictors_all], # Predictor variables
-  seed = 42,                    # Specify the seed for randomization to reproduce the same model again
+  seed = 42,                    # Specifying seed for randomization
   num.threads = parallel::detectCores() - 1) # Use all but one CPU core for quick model training
 ```
 ```{r echo=FALSE}
@@ -662,6 +661,9 @@ df_test$pred <- prediction$predictions
 predictions <- prediction$predictions
 ```
 To assess the performance of the model across various thresholds, I created the below Reciever Operating Curve with the True Positive Rate plotted against the False Positive Rate. Lower thresholds have higher TPR and FPRs.
+```{r echo=FALSE}
+library(plotROC)
+```
 ```{r echo=TRUE}
 #ROC Curve
 basicplot <- ggplot(df_test, aes(d=waterlog.100, m=pred[,1])) + geom_roc()
