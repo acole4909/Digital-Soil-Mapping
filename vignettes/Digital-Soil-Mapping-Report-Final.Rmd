@@ -159,7 +159,7 @@ mosaicplot(conf_matrix_waterlog_rfbasic$table,
 
 As reported by the confusion matrix above, our simple model using all predictors and pre-defined hyperparameters produced an Accuracy of 0.765. The Sensitivity was 0.6857, meaning that our model correctly predicted 68.57% of true positive and the Specificity was 0.8077, meaning that our model correctly predicted 80.77% of true negatives. 
 
-Finally, I used the model to create predictions for the entire study area and mapped these. As you can see from the below map, the soil was predicted to be higher
+Finally, I used the model to create predictions for the entire study area and mapped these. As you can see from the below map, the soil was predicted to be waterlogged in the south west and there are more areas predicted to be not waterlogged in the north east.
 ```{r echo=FALSE}
 df_predict$vszone <- trimws(df_predict$vszone) #vszone tif was reading in with missing values, this fixed the issue.
 ```
