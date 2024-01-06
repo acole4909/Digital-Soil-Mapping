@@ -20,6 +20,7 @@ cat("The target is:", target,
     "\nThe predictors_all are:", paste0(predictors_all[1:8], sep = ", "), "...")
 
 # Split dataset into training and testing sets
+set.seed(42)
 df_train <- df_full |> dplyr::filter(dataset == "calibration")
 df_test  <- df_full |> dplyr::filter(dataset == "validation")
 

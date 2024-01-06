@@ -8,7 +8,7 @@ library(ggplot2)
 library(terra)
 library(here)
 
-# Load Borruta random forest model
+# Load Boruta random forest model
 rf_bor   <- readRDS(here::here("data/rf_bor_for_waterlog.100.rds"))
 df_train <- readRDS(here::here("data/cal_bor_for_waterlog.100.rds"))
 df_test  <- readRDS(here::here("data/val_bor_for_waterlog.100.rds"))
@@ -22,38 +22,40 @@ preds_selected <- names(df_train[, predictors_selected])
 cat("The target is:", target,
     "\nThe predictors_selected are:", paste0(preds_selected[1:8], sep = ", "), "...")
 
+#### Hyperparameter Tuning
 # Recipes for Train
 set.seed(42)
 df_train$waterlog.100 <- as.factor(df_train$waterlog.100)
-is.factor(df_train$waterlog.100)
 pp <- recipes::recipe(waterlog.100 ~ NegO + mrvbf25 + mt_rr_y + Se_diss2m_50c + Se_TWI2m + Se_curv2m_s60 + be_gwn25_vdist + Se_MRVBF2m + lsf +
                         Se_TWI2m_s15 + cindx10_25 + mt_td_y + Se_tpi_2m_50c + terrTextur + tsc25_40 + Se_NO2m_r500 + Se_curv2m_fmean_50c + Se_TWI2m_s60 +
                         Se_slope50m + tsc25_18 + vdcn25 + Se_alti2m_std_50c + mt_tt_y + Se_curv50m + be_gwn25_hdist + Se_rough2m_10c + Se_curvplan2m_s60 +
-                        Se_diss2m_5c + Se_curvprof50m + Se_slope6m + Se_rough2m_5c + Se_SCA2m + Se_curvplan50m + Se_slope2m_s7 + Se_slope2m_fmean_5c +
-                        Se_slope2m_fmean_50c + Se_slope2m_s60, data = df_train)
+                        Se_diss2m_5c + Se_curvprof50m + Se_slope6m + Se_rough2m_5c + Se_curvplan50m + Se_slope2m_s7 + Se_slope2m_fmean_5c +
+                        Se_slope2m_fmean_50c, data = df_train)
 
-## Hyperparameter Tuning
+# Greedy Hyperparameter Tuning Approach
 mtry_values <- c(2,3,4,5,6,7,8,9,10,12,14,16)
-min.node.size_values <- c(2,5,10,20,25)
+min.node.size_values <- c(5,10,20,25,30,35,40,45,50,55,60)
 splitrule_values <- c("gini", "extratrees")
+set.seed(42)
 mod <- caret::train(
   pp,
   data = df_train %>%
     drop_na(),
   method = "ranger",
   trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
-  tuneGrid = expand.grid( .mtry = 9,
+  tuneGrid = expand.grid( .mtry = 6,
                           .min.node.size = min.node.size_values,
                           .splitrule = "gini"),
   metric = "Accuracy",
   replace = FALSE,
   sample.fraction = 0.5,
-  num.trees = 50,
-  seed = 42                # for reproducibility
-)
+  num.trees = 100,
+  seed = 42,                # for reproducibility
+  num.threads = parallel::detectCores() - 1)
 print(mod)
-# Best min.node.size was 10 with mtry of 9
+# Best min.node.size was 40 with mtry of 6 and splitrule gini
 
+set.seed(42)
 mod <- caret::train(
   pp,
   data = df_train %>%
@@ -61,43 +63,7 @@ mod <- caret::train(
   method = "ranger",
   trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
   tuneGrid = expand.grid( .mtry = mtry_values,
-                          .min.node.size = 5,
-                          .splitrule = "gini"),
-  metric = "Accuracy",
-  replace = FALSE,
-  sample.fraction = 0.5,
-  num.trees = 50,
-  seed = 42                # for reproducibility
-)
-print(mod)
-# Best mtry value was 12 with min.node.size 10
-
-mod <- caret::train(
-  pp,
-  data = df_train %>%
-    drop_na(),
-  method = "ranger",
-  trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
-  tuneGrid = expand.grid( .mtry = 12,
-                          .min.node.size = 10,
-                          .splitrule = splitrule_values),
-  metric = "Accuracy",
-  replace = FALSE,
-  sample.fraction = 0.5,
-  num.trees = 50,
-  seed = 42                # for reproducibility
-)
-print(mod)
-# Best combination of hyperparameters was mtry value=12, min.node.size=10, and splitrule=gini
-
-mod <- caret::train(
-  pp,
-  data = df_train |>
-    drop_na(),
-  method = "ranger",
-  trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
-  tuneGrid = expand.grid( .mtry = 12,
-                          .min.node.size = 10,
+                          .min.node.size = 40,
                           .splitrule = "gini"),
   metric = "Accuracy",
   replace = FALSE,
@@ -106,10 +72,68 @@ mod <- caret::train(
   seed = 42                # for reproducibility
 )
 print(mod)
+# Best mtry value was 14 with min.node.size 5 and splitrule gini
+set.seed(42)
+mod <- caret::train(
+  pp,
+  data = df_train %>%
+    drop_na(),
+  method = "ranger",
+  trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
+  tuneGrid = expand.grid( .mtry = 6,
+                          .min.node.size = 40,
+                          .splitrule = splitrule_values),
+  metric = "Accuracy",
+  replace = FALSE,
+  sample.fraction = 0.5,
+  num.trees = 100,
+  seed = 42                # for reproducibility
+)
+print(mod)
+# Best combination of hyperparameters found by greedy hyperparameter was mtry value=14, min.node.size=5, and splitrule=gini
+set.seed(42)
+mod_greedy <- caret::train(
+  pp,
+  data = df_train |>
+    drop_na(),
+  method = "ranger",
+  trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
+  tuneGrid = expand.grid( .mtry = 6,
+                          .min.node.size = 40,
+                          .splitrule = "extratrees"),
+  metric = "Accuracy",
+  replace = FALSE,
+  sample.fraction = 0.5,
+  num.trees = 100,
+  seed = 42                # for reproducibility
+)
+print(mod_greedy)
+
+## Grid Hyperparameter Tuning
+set.seed(42)
+mod_grid <- caret::train(
+  pp,
+  data = df_train|>
+    drop_na(),
+  method = "ranger",
+  trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
+  tuneGrid = expand.grid( .mtry = mtry_values,
+                          .min.node.size = min.node.size_values,
+                          .splitrule = splitrule_values),
+  metric = "Accuracy",
+  replace = FALSE,
+  sample.fraction = 0.5,
+  num.trees = 100,
+  seed = 42                # for reproducibility
+)
+print(mod_grid)
 
 # Save relevant data for model testing.
-saveRDS(mod,
-        here::here("data/rf_mod_for_waterlog.100.rds"))
+saveRDS(mod_greedy,
+        here::here("data/rf_mod_greedy_for_waterlog.100.rds"))
+
+saveRDS(mod_grid,
+        here::here("data/rf_mod_greedy_for_waterlog.100.rds"))
 
 saveRDS(df_train[, c(target, predictors_selected)],
         here::here("data/cal_mod_for_waterlog.100.rds"))
@@ -117,12 +141,14 @@ saveRDS(df_train[, c(target, predictors_selected)],
 saveRDS(df_test[, c(target, predictors_selected)],
         here::here("data/val_mod_for_waterlog.100.rds"))
 
-
-# Evaluation
 #### Model Analysis
-rf_mod   <- readRDS(here::here("data/rf_mod_for_waterlog.100.rds"))
+### Load Model and Data
+mod_greedy   <- readRDS(here::here("data/rf_mod_greedy_for_waterlog.100.rds"))
+mod_grid   <- readRDS(here::here("data/rf_mod_grid_for_waterlog.100.rds"))
 df_train <- readRDS(here::here("data/cal_bor_for_waterlog.100.rds"))
 df_test  <- readRDS(here::here("data/val_bor_for_waterlog.100.rds"))
+
+set.seed(42)
 
 # Load area to be predicted
 raster_mask <- terra::rast(here::here("data-raw/geodata/study_area/area_to_be_mapped.tif"))
@@ -168,10 +194,13 @@ df_predict <- terra::extract(
 df_predict <- cbind(df_locations, df_predict) |>
   tidyr::drop_na()
 
-# Make predictions for validation sites
+### Evaluation
+# Make predictions for validation sites using greedy model
+set.seed(42)
 prediction <- predict(
-  mod,
+  mod_greedy,
   newdata = df_test,
+  seed = 42,
   num.threads = parallel::detectCores() - 1
 )
 
@@ -189,46 +218,25 @@ conf_matrix_waterlog_rfmodcv
 mosaicplot(conf_matrix_waterlog_rfmodcv$table,
            main = "Confusion matrix")
 
-
-### Create Prediction Maps
+# Make predictions for validation sites using grid model
+set.seed(42)
 prediction <- predict(
-  rf_mod,              # RF model
-  newdata = df_predict,
-  num.threads = parallel::detectCores() - 1)
-
-# Attach predictions to dataframe and round them
-df_predict$prediction <- prediction
-
-# Extract dataframe with coordinates and predictions
-df_map <- df_predict |>
-  dplyr::select(x, y, prediction)
-
-# Turn dataframe into a raster
-raster_pred <- terra::rast(
-  df_map,                  # Table to be transformed
-  crs = "+init=epsg:2056", # Swiss coordinate system
-  extent = terra::ext(raster_covariates) # Prescribe same extent as predictor rasters
+  mod_grid,
+  newdata = df_test,
+  seed = 42,
+  num.threads = parallel::detectCores() - 1
 )
 
-# Visualise predictions
-ggplot2::ggplot() +
-  tidyterra::geom_spatraster(data = raster_pred) +
-  ggplot2::scale_fill_viridis_c(
-    na.value = NA,
-    option = "viridis",
-    name = "Waterlog.100"
-  ) +
-  ggplot2::theme_classic() +
-  ggplot2::scale_x_continuous(expand = c(0, 0)) +
-  ggplot2::scale_y_continuous(expand = c(0, 0)) +
-  ggplot2::labs(title = "Predicted Waterlog")
+# Save predictions to validation df
+df_test$predcv <- prediction
 
-# Save raster as .tif file
-if (!dir.exists(here::here("data"))) system(paste0("mkdir ", here::here("data")))
-terra::writeRaster(
-  raster_pred,
-  "data/ra_predicted_rfmod_waterlog100.tif",
-  datatype = "FLT4S",  # FLT4S for floats, INT1U for integers (smaller file)
-  filetype = "GTiff",  # GeoTiff format
-  overwrite = TRUE     # Overwrite existing file
-)
+# Classification Metrics
+Y <- df_test$waterlog.100
+Y <- as.factor(Y)
+X <- df_test$predcv
+X <- as.factor(X)
+
+conf_matrix_waterlog_rfmodcv <- caret::confusionMatrix(data=X, reference=Y, positive="1")
+conf_matrix_waterlog_rfmodcv
+mosaicplot(conf_matrix_waterlog_rfmodcv$table,
+           main = "Confusion matrix")

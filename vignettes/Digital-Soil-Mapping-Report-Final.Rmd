@@ -4,7 +4,7 @@ author: "Amanda Cole"
 date: "2023-12-19"
 output: 
   html_document:
-  code_folding: hide
+    code_folding: hide
 ---
 ---
 # 5.1 Simple Model
@@ -25,7 +25,7 @@ head(df_full) |>
 ```
 
 After loading the data, I set the target to waterlog.100, a binary categorical variable which contains values of 0 and 1 indicating whether the soil is waterlogged at 100cm depth. I set the predictors to include all predictors in the covariates dataset. 
-```{r setup, include=FALSE}
+```{r, class.source= 'fold-show'}
 knitr::opts_chunk$set(
 	echo = TRUE,
 	message = FALSE,
@@ -36,7 +36,9 @@ target <- "waterlog.100"
 
 ## Specify predictors_all: Remove soil sampling and observational data
 predictors_all <- names(df_full)[14:ncol(df_full)]
+```
 
+```{r echo=FALSE}
 cat("The target is:", target,
     "\nThe predictors_all are:", paste0(predictors_all[1:8], sep = ", "), "...")
 ```
@@ -63,14 +65,14 @@ cat("For model training, we have a calibration / validation split of: ",
 ```
 
 After splitting the data into training and test sets, I then trained a Random Forest model using the {ranger} package. Because we are predicting for a categorical variable, this will be a classification model so I set "classification" = TRUE.
-```{r echo=TRUE}
+```{r echo=TRUE, class.source= 'fold-show'}
 rf_basic <- ranger::ranger(
   probability = FALSE,
   classification = TRUE,
   y = df_train[, target],     # Target variable
   x = df_train[, predictors_all], # Predictor variables
   seed = 42,                    # Specifying seed for randomization
-  num.threads = parallel::detectCores() - 1) # Use all but one CPU core for quick model training
+  num.threads = parallel::detectCores() - 1) 
 ```
 ```{r echo=FALSE}
 # Print a summary of fitted model
@@ -78,7 +80,7 @@ print(rf_basic)
 ```
 
 I then evaluated the RF classification model on the testing set. 
-```{r echo=FALSE}
+```{r include=FALSE}
 # Load area to be predicted
 raster_mask <- terra::rast(here::here("data-raw/geodata/study_area/area_to_be_mapped.tif"))
 # Turn target raster into a dataframe, 1 px = 1 cell
@@ -305,16 +307,14 @@ ggplot2::ggplot(ggplot2::aes(x = reorder(rowname, meanImp),
   ggplot2::coord_flip()
 ```
 
-The Boruta algorithm categorized 39 variables as "Confirmed". The variables deemed important by the Boruta algorithm were largely the same as those identified by the {ranger} package.
-```{r echo=FALSE}
+The Boruta algorithm categorized 37 variables as "Confirmed". The variables deemed important by the Boruta algorithm were largely the same as those identified by the {ranger} package. I then retrained the Random Forest model using the 39 variables deemed important by the Boruta algorithm.
+```{r echo=TRUE}
 # get retained important variables
 predictors_selected <- df_bor |>
   dplyr::filter(decision == "Confirmed") |>
   dplyr::pull(rowname)
 length(predictors_selected)
 ```
-
-I then retrained the Random Forest model using the 39 variables deemed important by the Boruta algorithm.
 ```{r echo=TRUE}
 # re-train Random Forest model
 rf_bor <- ranger::ranger(
@@ -408,24 +408,63 @@ The model trained using the predictors selected by the Boruta algorithm had a hi
 
 However, when considering the OOB prediction error reported as part of the trained model object, the simple model actually has a better OOB prediction error than that of the model trained on the Boruta selected predictors (21% vs 20.5% respectively). 
 
+The Predicted Waterlog map using the selected predictors is shown below.
+```{r echo=FALSE}
+### Create Prediction Maps
+prediction <- predict(
+  rf_bor,              # RF model
+  data = df_predict,
+  num.threads = parallel::detectCores() - 1)
+
+# Attach predictions to dataframe
+df_predict$prediction <- prediction$predictions
+
+# Extract dataframe with coordinates and predictions
+df_map <- df_predict |>
+  dplyr::select(x, y, prediction)
+
+# Turn dataframe into a raster
+raster_pred <- terra::rast(
+  df_map,                  # Table to be transformed
+  crs = "+init=epsg:2056", # Swiss coordinate system
+  extent = terra::ext(raster_covariates) # Prescribe same extent as predictor rasters
+)
+
+# Visualise predictions
+ggplot2::ggplot() +
+  tidyterra::geom_spatraster(data = raster_pred) +
+  ggplot2::scale_fill_viridis_c(
+    breaks = seq(0,1, by=1),
+    labels = c("0", "1"),
+    na.value = NA,
+    option = "viridis",
+    name = "Waterlog.100"
+  ) +
+  ggplot2::theme_classic() +
+  ggplot2::scale_x_continuous(expand = c(0, 0)) +
+  ggplot2::scale_y_continuous(expand = c(0, 0)) +
+  ggplot2::labs(title = "Predicted Waterlog")
+```
+
 # 5.3 Model Optimization
 
 For Random Forest algorithms, we can control the complexity and randomness of the RF through hyperparameters in the {ranger} package such as min.node.size, num.trees, and mtry. Hyperparameters have a large impact on model performance and sub-optimal hyperparameters can lead to over or under fitting or low generalisability^1^. While our Random Forest models have fairly good accuracy with the pre-defined hyperparameters, we can tune the hyperparameters to improve model performance.  
 
-I used the {caret} library to implement a 5-fold cross-validation to optimise hyperparameters m.try, min.node.size, and splitrule, using a greedy hyperparameter tuning approach. 
+I used the {caret} library to implement a 5-fold cross-validation to optimise hyperparameters m.try, min.node.size, and splitrule, using a greedy hyperparameter tuning approach and a grid hyperparameter approach.
 ```{r include=FALSE}
 # Set recipe
+set.seed(42)
 df_train$waterlog.100 <- as.factor(df_train$waterlog.100)
-
-pp <- recipes::recipe(waterlog.100 ~ NegO + mrvbf25 + mt_rr_y + Se_diss2m_50c + Se_TWI2m + Se_curv2m_s60 + be_gwn25_vdist + Se_MRVBF2m + lsf + Se_TWI2m_s15 + cindx10_25 + mt_td_y + Se_tpi_2m_50c + terrTextur + tsc25_40 + Se_NO2m_r500 + Se_curv2m_fmean_50c + Se_TWI2m_s60 + Se_slope50m + tsc25_18 + vdcn25 + Se_alti2m_std_50c + mt_tt_y + Se_curv50m + be_gwn25_hdist + Se_rough2m_10c + Se_curvplan2m_s60 + Se_diss2m_5c + Se_curvprof50m + Se_slope6m + Se_rough2m_5c + Se_SCA2m + Se_curvplan50m + Se_slope2m_s7 + Se_slope2m_fmean_5c + Se_slope2m_fmean_50c + Se_slope2m_s60 + Se_curv25m, data = df_train)
+pp <- recipes::recipe(waterlog.100 ~ NegO + mrvbf25 + mt_rr_y + Se_diss2m_50c + Se_TWI2m + Se_curv2m_s60 + be_gwn25_vdist + Se_MRVBF2m + lsf + Se_TWI2m_s15 + cindx10_25 + mt_td_y + Se_tpi_2m_50c + terrTextur + tsc25_40 + Se_NO2m_r500 + Se_curv2m_fmean_50c + Se_TWI2m_s60 + Se_slope50m + tsc25_18 + vdcn25 + Se_alti2m_std_50c + mt_tt_y + Se_curv50m + be_gwn25_hdist + Se_rough2m_10c + Se_curvplan2m_s60 + Se_diss2m_5c + Se_curvprof50m + Se_slope6m + Se_rough2m_5c + Se_SCA2m + Se_curvplan50m + Se_slope2m_s7 + Se_slope2m_fmean_5c + Se_slope2m_fmean_50c + Se_slope2m_s60, data = df_train)
 ```
-After setting the possible mtry, min.node.size, and splitrule values, I optimized min.node.size first, keeping mtry and splitrule constant. 
+After setting the possible mtry, min.node.size, and splitrule values, I optimized using a greedy hyperparameter approach first starting by optmizing min.node.size, keeping mtry constant at 6 (as the default value for mtry for a classification problem is the square root of the number of predictors) and splitrule constant to gini. 
 ```{r echo=TRUE}
-## Hyperparameter Tuning
+### Greedy Hyperparameter Tuning
 mtry_values <- c(2,3,4,5,6,7,8,9,10,12,14,16)
 min.node.size_values <- c(2,5,10,20,25)
 splitrule_values <- c("gini", "extratrees")
 
+set.seed(42)
 mod <- caret::train(
   pp,
   data = df_train %>%
@@ -446,8 +485,9 @@ mod <- caret::train(
 print(mod)
 ```
 
-Then I used the best value for min.node.size (10) and optimised mtry. 
+The best value for min.node.size with an mtry of 6 and splitrule gini was between 2 and 5. I chose to use 5 as setting a low number of min.node.size may lead to overfitting and decrease generalisability. Then I optimized mtry while keeping min.node.size and splitrule constant. 
 ```{r echo=TRUE}
+set.seed(42)
 mod <- caret::train(
   pp,
   data = df_train %>%
@@ -455,7 +495,7 @@ mod <- caret::train(
   method = "ranger",
   trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
   tuneGrid = expand.grid( .mtry = mtry_values,
-                          .min.node.size = 10,
+                          .min.node.size = 5,
                           .splitrule = "gini"),
   metric = "Accuracy",
   replace = FALSE,
@@ -468,7 +508,8 @@ mod <- caret::train(
 print(mod)
 ```
 Then, used the best value for mtry and the best value for min.node.size obtained from the previous run and optimised splitrule.
-```{r echo=FALSE}
+```{r echo=TRUE}
+set.seed(42)
 mod <- caret::train(
   pp,
   data = df_train %>%
@@ -488,11 +529,9 @@ mod <- caret::train(
 ```{r echo=FALSE}
 print(mod)
 ```
-The best combination of hyperparameters obtained from greedy hyperparameter tuning was mtry=12, min.node.size=12, and splitrule=gini.
-
-I then retrained the model using the optimized hyperparameters.
+The best combination of hyperparameters obtained from greedy hyperparameter tuning was mtry=6, min.node.size=5, and splitrule=gini. I then retrained the model using the optimized hyperparameters.
 ```{r echo=TRUE}
-mod <- caret::train(
+mod_greedy <- caret::train(
   pp,
   data = df_train |>
     drop_na(),
@@ -509,12 +548,12 @@ mod <- caret::train(
 )
 ```
 ```{r echo=FALSE}
-print(mod)
+print(mod_greedy)
 ```
-I then evaluated the model on the testing subset of the data. 
+I then evaluated the model optimised using the greedy hyperparameter tuning approach on the testing subset of the data. 
 ```{r include=FALSE}
 #### Model Analysis
-rf_mod   <- readRDS(here::here("data/rf_mod_for_waterlog.100.rds"))
+mod_greedy   <- readRDS(here::here("data/rf_mod_greedy_for_waterlog.100.rds"))
 df_train <- readRDS(here::here("data/cal_bor_for_waterlog.100.rds"))
 df_test  <- readRDS(here::here("data/val_bor_for_waterlog.100.rds"))
 
@@ -560,9 +599,9 @@ df_predict <- cbind(df_locations, df_predict) |>
 ```
 
 ```{r echo=TRUE}
-# Make predictions for validation sites
+# Make predictions for validation sites using model optimised through greedy approach
 prediction <- predict(
-  rf_mod,           # RF model
+  mod_greedy,           # RF model
   newdata = df_test,   # Predictor data
   num.threads = parallel::detectCores() - 1
 )
@@ -584,10 +623,106 @@ mosaicplot(conf_matrix_waterlog_rfbasic$table,
            main = "Confusion matrix")
 ```
 
-The model accuracy obtained with the optimised hyperparameters was 0.785. Therefore, this model does not generalise better to unseen data than the initial model. The default hyperparameters were mtry=6 and target node size=1. 
+The model accuracy obtained with the hyperparameters optimized using the greedy approach was 0.785. Therefore, this model does not generalise better to unseen data than the initial model which had an accuracy of 0.79.
+
+I then used a grid hyperparameter tuning approach as below. The optimal hyperparameters found by the grid hyperparameter tuning approach were mtry = 6, min.node.size = 25, and splitrule = extra trees. 
+```{r echo=TRUE}
+## Grid Hyperparameter Tuning
+set.seed(42)
+mod_grid <- caret::train(
+  pp,
+  data = df_train|>
+    drop_na(),
+  method = "ranger",
+  trControl = trainControl(method = "cv", number = 5, savePredictions = "final"),
+  tuneGrid = expand.grid( .mtry = mtry_values,
+                          .min.node.size = min.node.size_values,
+                          .splitrule = splitrule_values),
+  metric = "Accuracy",
+  replace = FALSE,
+  sample.fraction = 0.5,
+  num.trees = 100,
+  seed = 42                # for reproducibility
+)
+print(mod_grid)
+```
+I evaluated the model optimised using the grid hyperparameter tuning approach on the testing subset of the data. The accuracy using the hyperparameters from the grid hyperparameter tuning approach was 0.705. 
+```{r include=FALSE}
+#### Model Analysis
+mod_grid   <- readRDS(here::here("data/rf_mod_grid_for_waterlog.100.rds"))
+df_train <- readRDS(here::here("data/cal_bor_for_waterlog.100.rds"))
+df_test  <- readRDS(here::here("data/val_bor_for_waterlog.100.rds"))
+
+# Load area to be predicted
+raster_mask <- terra::rast(here::here("data-raw/geodata/study_area/area_to_be_mapped.tif"))
+# Turn target raster into a dataframe, 1 px = 1 cell
+df_mask <- as.data.frame(raster_mask, xy = TRUE)
+
+# Filter only for area of interest
+df_mask <- df_mask |>
+  dplyr::filter(area_to_be_mapped == 1)
+
+files_covariates <- list.files(
+  path = here::here("data-raw/geodata/covariates/"),
+  pattern = ".tif$",
+  recursive = TRUE,
+  full.names = TRUE
+)
+
+preds_selected <- names(df_train[, predictors_selected])
+files_selected <- files_covariates[apply(sapply(X = preds_selected,
+                                                FUN = grepl,
+                                                files_covariates),
+                                         MARGIN =  1,
+                                         FUN = any)]
+
+# Load all rasters as a stack
+raster_covariates <- terra::rast(files_selected)
+
+# Get coordinates for which we want data
+df_locations <- df_mask |>
+  dplyr::select(x, y)
+
+# Extract data from covariate raster stack for all gridcells in the raster
+df_predict <- terra::extract(
+  raster_covariates,   # The raster we want to extract from
+  df_locations,        # A matrix of x and y values to extract for
+  ID = FALSE           # To not add a default ID column to the output
+)
+
+df_predict <- cbind(df_locations, df_predict) |>
+  tidyr::drop_na()  # Se_TWI2m has a small number of missing data
+```
+```{r echo=FALSE}
+### Evaluation
+# Make predictions for validation sites using greedy model
+set.seed(42)
+prediction <- predict(
+  mod_grid,
+  newdata = df_test,
+  seed = 42,
+  num.threads = parallel::detectCores() - 1
+)
+
+# Save predictions to validation df
+df_test$predcv <- prediction
+
+# Classification Metrics
+Y <- df_test$waterlog.100
+Y <- as.factor(Y)
+X <- df_test$predcv
+X <- as.factor(X)
+
+conf_matrix_waterlog_rfmodcv <- caret::confusionMatrix(data=X, reference=Y, positive="1")
+conf_matrix_waterlog_rfmodcv
+mosaicplot(conf_matrix_waterlog_rfmodcv$table,
+           main = "Confusion matrix")
+```
+
+The greedy hyperparameter tuning approach resulted in a higher accuracy and Kappa values than the grid hyperparameter tuning approach however neither the grid nor the greedy hyperparameter tuning approaches resulted in a model that had a higher accuracy than the default hyperparameters of mtry=6, min.node.size=1, and splitrule=gini. The optimal min.node.size found by both the greedy and grid hyperparameter tuning approaches (5 and 25 respectively) were higher than the default min.node.size of 1. As higher min.node.sizes should increase model generalisability resulting in a model that performs better on the new testing data, we would expect a higher accuracy when evaluating the model on the testing subset of the data, however this was not the case. The mtry value for 
 
 # 5.4 Probabalistic Predictions
-To predict the probability of the soil to be waterlogged, I trained a probabalistic random forest model by setting probabilty=TRUE as below:
+To predict the probability of the soil to be waterlogged, I trained a probabalistic random forest model by setting probabilty=TRUE as below and made predictions for the validation sites.
 
 ```{r echo=TRUE}
 rf_prob <- ranger::ranger(
@@ -603,7 +738,7 @@ num.threads = parallel::detectCores() - 1)
 print(rf_prob)
 ```
 
-```{r echo=FALSE}
+```{r include=FALSE}
 # Load area to be predicted
 raster_mask <- terra::rast(here::here("data-raw/geodata/study_area/area_to_be_mapped.tif"))
 # Turn target raster into a dataframe, 1 px = 1 cell
@@ -664,7 +799,7 @@ To assess the performance of the model across various thresholds, I created the 
 ```{r echo=FALSE}
 library(plotROC)
 ```
-```{r echo=TRUE}
+```{r echo=FALSE}
 #ROC Curve
 basicplot <- ggplot(df_test, aes(d=waterlog.100, m=pred[,1])) + geom_roc()
 basicplot

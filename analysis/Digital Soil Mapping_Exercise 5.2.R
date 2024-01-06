@@ -17,6 +17,7 @@ target <- "waterlog.100"
 predictors_all <- names(df_full)[14:ncol(df_full)]
 
 ### Variable Importance
+set.seed(42)
 rf_varimport <- ranger::ranger(
   probability = FALSE,
   y = df_train[, target],     # target variable
@@ -32,7 +33,6 @@ print(rf_varimport)
 vi_rf_varimport <- rf_varimport$variable.importance |>
   dplyr::bind_rows() |>
   tidyr::pivot_longer(cols = dplyr::everything(), names_to = "Variable")
-
 vi_rf_varimport_top5 <- vi_rf_varimport |>
   top_n(5, value)
 vi_rf_varimport_top5 <- vi_rf_varimport_top5 |>
@@ -68,7 +68,8 @@ set.seed(42)
 bor <- Boruta::Boruta(
   y = df_train[, target],
   x = df_train[, predictors_all],
-  maxRuns = 50, # Number of iterations. Set to 30 or lower if it takes too long
+  maxRuns = 50,
+  seed = 42,
   num.threads = parallel::detectCores()-1)
 
 df_bor <- Boruta::attStats(bor) |>
@@ -95,6 +96,7 @@ predictors_selected <- df_bor |>
   dplyr::pull(rowname)
 
 # Re-train Random Forest model
+set.seed(42)
 rf_bor <- ranger::ranger(
   probability = FALSE,
   y = df_train[, target],              # target variable
@@ -102,8 +104,7 @@ rf_bor <- ranger::ranger(
   classification = TRUE,
   seed = 42,                           # Specify the seed for randomization to reproduce the same model again
   num.threads = parallel::detectCores() - 1)
-
-rf_bor
+print(rf_bor)
 
 # Save Data
 saveRDS(rf_bor,
@@ -167,10 +168,12 @@ df_predict <- cbind(df_locations, df_predict) |>
   tidyr::drop_na()
 
 # Make predictions for validation sites
+set.seed(42)
 prediction <- predict(
   rf_bor,           # RF model
   data = df_test,   # Predictor data
-  num.threads = parallel::detectCores() - 1
+  num.threads = parallel::detectCores() - 1,
+  seed = 42
 )
 
 # Save predictions to validation data frame
