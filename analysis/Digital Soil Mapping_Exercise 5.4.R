@@ -3,7 +3,6 @@
 rf_bor   <- readRDS(here::here("data/rf_bor_for_waterlog.100.rds"))
 df_train <- readRDS(here::here("data/cal_bor_for_waterlog.100.rds"))
 df_test  <- readRDS(here::here("data/val_bor_for_waterlog.100.rds"))
-predictors_selected <- readRDS(here::here("data/predictors_selected.rds"))
 library(plotROC)
 
 rf_prob <- ranger::ranger(
