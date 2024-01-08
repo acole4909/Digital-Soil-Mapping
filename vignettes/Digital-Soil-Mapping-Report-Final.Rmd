@@ -155,7 +155,7 @@ X <- as.factor(X)
 conf_matrix_waterlog_rfbasic <- caret::confusionMatrix(data=X, reference=Y, positive="1")
 conf_matrix_waterlog_rfbasic
 mosaicplot(conf_matrix_waterlog_rfbasic$table,
-           main = "Confusion Matrix for Simple Random Forest Model")
+           main = "Figure 1. Confusion Matrix for Simple Random Forest Model")
 ```
 
 As reported by the confusion matrix above, our simple model using all predictors and pre-defined hyperparameters produced an Accuracy of 0.75. The Sensitivity was 0.6714, meaning that our model correctly predicted ~67.14% of true positive and the Specificity was 0.7923, meaning that our model correctly predicted ~97.23 of true negatives. 
@@ -199,7 +199,7 @@ ggplot2::ggplot() +
   ggplot2::theme_classic() +
   ggplot2::scale_x_continuous(expand = c(0, 0)) +
   ggplot2::scale_y_continuous(expand = c(0, 0)) +
-  ggplot2::labs(title = "Predicted Waterlog Map for Simple Random Forest Model")
+  ggplot2::labs(title = "Figure 2. Predicted Waterlog Map for Simple Random Forest Model")
 ```
 
 
@@ -237,7 +237,7 @@ gg <- vi_rf_varimport |>
   ggplot2::labs(
     y = "Change in OOB accuracy after permutation",
     x = "",
-    title = "Variable importance based on OOB") +
+    title = "Figure 3. Variable importance based on OOB") +
   ggplot2::theme(text=element_text(size=7))+
   ggplot2::coord_flip()
 
@@ -302,7 +302,7 @@ ggplot2::ggplot(ggplot2::aes(x = reorder(rowname, meanImp),
   ggplot2::labs(
     y = "Variable importance",
     x = "",
-    title = "Variable importance based on Boruta") +
+    title = "Figure 4. Variable importance based on Boruta") +
   ggplot2::theme(text=element_text(size=7)) +
   ggplot2::coord_flip()
 ```
@@ -398,7 +398,7 @@ X <- as.factor(X)
 conf_matrix_waterlog_bor <- caret::confusionMatrix(data=X, reference=Y, positive="1")
 conf_matrix_waterlog_bor
 mosaicplot(conf_matrix_waterlog_rfbasic$table,
-           main = "Confusion matrix")
+           main = "Figure 5. Confusion Matrix for Boruta RF")
 ```
 
 As reported by the confusion matrix above, our model using predictors selected by the Boruta algorithm and pre-defined hyperparameters produced an Accuracy of 0.79. The Sensitivity was 0.7286, meaning that our model correctly predicted 72.86% of true positive and the Specificity was 0.8231, meaning that our model correctly predicted 82.31% of true negatives. 
@@ -442,7 +442,7 @@ ggplot2::ggplot() +
   ggplot2::theme_classic() +
   ggplot2::scale_x_continuous(expand = c(0, 0)) +
   ggplot2::scale_y_continuous(expand = c(0, 0)) +
-  ggplot2::labs(title = "Predicted Waterlog")
+  ggplot2::labs(title = "Figure 6. Predicted Waterlog for Boruta RF")
 ```
 
 # 5.3 Model Optimization
@@ -576,8 +576,6 @@ X <- as.factor(X)
 
 conf_matrix_waterlog_rfmodcv <- caret::confusionMatrix(data=X, reference=Y, positive="1")
 conf_matrix_waterlog_rfmodcv
-mosaicplot(conf_matrix_waterlog_rfbasic$table,
-           main = "Confusion matrix")
 ```
 
 The model accuracy obtained with the hyperparameters optimized using the greedy approach was 0.73. Therefore, this model does not generalise better to unseen data than the initial model which had an accuracy of 0.79.
@@ -639,7 +637,6 @@ X <- as.factor(X)
 
 conf_matrix_waterlog_rfmodcv <- caret::confusionMatrix(data=X, reference=Y, positive="1")
 conf_matrix_waterlog_rfmodcv
-mosaicplot(conf_matrix_waterlog_rfmodcv$table, main = "Confusion matrix")
 ```
 
 Neither the grid nor the greedy hyperparameter tuning approaches resulted in a model that had a higher accuracy than the boruta algorithm trained with the default hyperparameters of mtry=6, min.node.size=1, and splitrule=gini. The optimal min.node.size found by both the greedy and grid hyperparameter tuning approaches were higher than the default min.node.size of 1 and as higher min.node.sizes should increase model generalisability resulting in a model that performs better on the new testing data^1^, we would expect a higher accuracy when evaluating the model on the testing subset of the data, however this was not the case.
