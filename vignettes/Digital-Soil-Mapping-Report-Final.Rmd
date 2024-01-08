@@ -3,9 +3,9 @@ title: "Digital Soil Mapping Report"
 author: "Amanda Cole"
 date: "2023-12-19"
 output:
-  pdf_document: default
   html_document:
     code_folding: hide
+  pdf_document: default
 ---
 ---
 # 5.1 Simple Model
@@ -31,7 +31,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-After loading the data, I set the target to waterlog.100, a binary categorical variable which contains values of 0 and 1 indicating whether the soil is waterlogged at 100cm depth. I set the predictors to include all predictors in the covariates dataset. I then split the dataset into training and test sets. 
+I prepared the data following the exercise as detailed in the Data_Preparation file in the analysis folder. I then load the prepared data and set the target to waterlog.100, a binary categorical variable which contains values of 0 and 1 indicating whether the soil is waterlogged at 100cm depth. I set the predictors to include all predictors in the covariates dataset. I then split the dataset into training and test sets. 
 ```{r, class.source= 'fold-show'}
 ## Specify target: Waterlog.100
 target <- "waterlog.100"
@@ -155,7 +155,7 @@ X <- as.factor(X)
 conf_matrix_waterlog_rfbasic <- caret::confusionMatrix(data=X, reference=Y, positive="1")
 conf_matrix_waterlog_rfbasic
 mosaicplot(conf_matrix_waterlog_rfbasic$table,
-           main = "Confusion matrix")
+           main = "Confusion Matrix for Simple Random Forest Model")
 ```
 
 As reported by the confusion matrix above, our simple model using all predictors and pre-defined hyperparameters produced an Accuracy of 0.75. The Sensitivity was 0.6714, meaning that our model correctly predicted ~67.14% of true positive and the Specificity was 0.7923, meaning that our model correctly predicted ~97.23 of true negatives. 
@@ -199,7 +199,7 @@ ggplot2::ggplot() +
   ggplot2::theme_classic() +
   ggplot2::scale_x_continuous(expand = c(0, 0)) +
   ggplot2::scale_y_continuous(expand = c(0, 0)) +
-  ggplot2::labs(title = "Predicted Waterlog")
+  ggplot2::labs(title = "Predicted Waterlog Map for Simple Random Forest Model")
 ```
 
 
